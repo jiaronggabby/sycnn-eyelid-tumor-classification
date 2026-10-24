@@ -19,6 +19,8 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageOps
 
+LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -35,7 +37,7 @@ def letterbox(path: str | Path, size: int) -> np.ndarray:
     width, height = image.size
     scale = min(size / max(width, 1), size / max(height, 1))
     target = (max(1, round(width * scale)), max(1, round(height * scale)))
-    resized = image.resize(target, Image.Resampling.LANCZOS)
+    resized = image.resize(target, LANCZOS)
     left = (size - target[0]) // 2
     top = (size - target[1]) // 2
     right = size - target[0] - left
@@ -46,7 +48,7 @@ def letterbox(path: str | Path, size: int) -> np.ndarray:
 
 
 def difference_hash(array: np.ndarray) -> int:
-    gray = Image.fromarray(array, mode="RGB").convert("L").resize((9, 8), Image.Resampling.LANCZOS)
+    gray = Image.fromarray(array, mode="RGB").convert("L").resize((9, 8), LANCZOS)
     values = np.asarray(gray, dtype=np.uint8)
     bits = values[:, 1:] > values[:, :-1]
     result = 0
