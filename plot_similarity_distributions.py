@@ -30,6 +30,7 @@ RESAMPLING = getattr(Image, "Resampling", Image)
 
 NUMERIC_FIELDS = (
     "generation_method",
+    "seed",
     "synthetic_label",
     "feature_cosine_similarity",
     "ssim_to_nearest_feature_neighbor",
@@ -39,7 +40,7 @@ NUMERIC_FIELDS = (
 )
 
 
-def load_rows(path: Path, expected_per_method: int) -> list[dict[str, str]]:
+def load_rows(path: Path, expected_gan: int, expected_diffusion: int) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
         missing = set(NUMERIC_FIELDS) - set(reader.fieldnames or [])
@@ -54,8 +55,9 @@ def load_rows(path: Path, expected_per_method: int) -> list[dict[str, str]]:
     if not rows:
         raise ValueError("Input contains no sample rows")
     counts = {method: sum(r["generation_method"] == method for r in rows) for method in METHOD_ORDER}
-    if any(counts[method] != expected_per_method for method in METHOD_ORDER):
-        raise ValueError(f"Expected {expected_per_method} samples per method, found {counts}")
+    expected = {"gan": expected_gan, "diffusion": expected_diffusion}
+    if any(counts[method] != expected[method] for method in METHOD_ORDER):
+        raise ValueError(f"Expected {expected}, found {counts}")
     return rows
 
 
@@ -112,6 +114,7 @@ def draw_panel(
     x0: int,
     fonts_pair: tuple[ImageFont.FreeTypeFont, ImageFont.FreeTypeFont],
     seed: int,
+    include_negative: bool = False,
 ) -> None:
     draw = ImageDraw.Draw(image, "RGBA")
     regular, bold = fonts_pair
@@ -121,15 +124,18 @@ def draw_panel(
     axis_top = 205
     axis_bottom = 1460
     axis_height = axis_bottom - axis_top
+    metric_values = [float(row[metric_column]) for row in rows]
+    y_min = min(0.0, math.floor(min(metric_values) * 10) / 10) if include_negative else 0.0
+    y_max = max(1.0, math.ceil(max(metric_values) * 10) / 10)
 
     def y(value: float) -> int:
-        return round(axis_bottom - value * axis_height)
+        return round(axis_bottom - (value - y_min) / (y_max - y_min) * axis_height)
 
     # Panel letter sits in the reserved upper-left margin, outside the axes.
     draw.text((x0 + 105, 76), label, font=bold, fill=INK)
 
     for tick in range(6):
-        value = tick / 5
+        value = y_min + (y_max - y_min) * tick / 5
         yy = y(value)
         draw.line((axis_left, yy, axis_right, yy), fill=GRID, width=3)
         tick_box = draw.textbbox((0, 0), f"{value:.1f}", font=regular)
@@ -147,7 +153,8 @@ def draw_panel(
     centers = (axis_left + round((axis_right - axis_left) * 0.31), axis_left + round((axis_right - axis_left) * 0.71))
     jitter = random.Random(seed)
     for method, center in zip(METHOD_ORDER, centers):
-        group = [float(row[metric_column]) for row in rows if row["generation_method"].lower() == method]
+        method_rows = [row for row in rows if row["generation_method"].lower() == method]
+        group = [float(row[metric_column]) for row in method_rows]
         expected_count = sum(r["generation_method"].lower() == method for r in rows)
         if len(group) != expected_count:
             raise ValueError(f"Inconsistent values for {method} in {metric_column}")
@@ -170,7 +177,9 @@ def draw_panel(
         draw.rectangle((center - box_width // 2, y(q3), center + box_width // 2, y(q1)), fill=color["box"], outline=INK, width=4)
         draw.line((center - box_width // 2, y(med), center + box_width // 2, y(med)), fill=INK, width=6)
 
-        for value in group:
+        display_rows = random.Random(seed).sample(method_rows, min(800, len(method_rows)))
+        for row in display_rows:
+            value = float(row[metric_column])
             xx = center + jitter.randint(-145, 145)
             yy = y(value)
             draw.ellipse((xx - 12, yy - 12, xx + 12, yy + 12), fill=color["point"])
@@ -185,20 +194,21 @@ def main() -> int:
     parser.add_argument("input_csv", type=Path, help="per_sample_neighbors.csv from the analysis")
     parser.add_argument("--numeric-csv", type=Path, required=True, help="identifier-free metric table to export")
     parser.add_argument("--figure", type=Path, required=True, help="output PNG for Supplementary Figure S4")
-    parser.add_argument("--expected-per-method", type=int, default=200)
+    parser.add_argument("--expected-gan", type=int, default=8475)
+    parser.add_argument("--expected-diffusion", type=int, default=25425)
     parser.add_argument("--font", type=Path, help="optional path to a TrueType sans-serif font")
     args = parser.parse_args()
 
-    if args.expected_per_method < 1:
-        parser.error("--expected-per-method must be positive")
-    rows = load_rows(args.input_csv, args.expected_per_method)
+    if min(args.expected_gan, args.expected_diffusion) < 1:
+        parser.error("expected sample counts must be positive")
+    rows = load_rows(args.input_csv, args.expected_gan, args.expected_diffusion)
     export_numeric_csv(rows, args.numeric_csv)
 
     width, height = 4200, 1800
     image = Image.new("RGBA", (width, height), (255, 255, 255, 255))
     font_pair = fonts(args.font)
-    draw_panel(image, rows, "feature_cosine_similarity", "ResNet18 cosine similarity", "A", 0, font_pair, 2401)
-    draw_panel(image, rows, "ssim_to_nearest_feature_neighbor", "SSIM", "B", 2070, font_pair, 2402)
+    draw_panel(image, rows, "feature_cosine_similarity", "ResNet50 feature cosine similarity", "A", 0, font_pair, 2401)
+    draw_panel(image, rows, "ssim_to_nearest_feature_neighbor", "SSIM", "B", 2070, font_pair, 2402, include_negative=True)
     args.figure.parent.mkdir(parents=True, exist_ok=True)
     image.convert("RGB").save(args.figure, dpi=(600, 600), optimize=True)
     return 0
