@@ -55,6 +55,35 @@ def difference_hash(array: np.ndarray) -> int:
     return result
 
 
+def _box_mean(array: np.ndarray, window: int = 11) -> np.ndarray:
+    """Mean filter from an integral image, without an extra image dependency."""
+    radius = window // 2
+    padded = np.pad(array, ((radius, radius), (radius, radius)), mode="reflect")
+    integral = np.pad(padded, ((1, 0), (1, 0)), mode="constant").cumsum(0).cumsum(1)
+    sums = (
+        integral[window:, window:]
+        - integral[:-window, window:]
+        - integral[window:, :-window]
+        + integral[:-window, :-window]
+    )
+    return sums / float(window * window)
+
+
+def structural_similarity(gray_a: np.ndarray, gray_b: np.ndarray, window: int = 11) -> float:
+    """Mean SSIM with an 11x11 uniform window and 8-bit luminance range."""
+    a = gray_a.astype(np.float64, copy=False)
+    b = gray_b.astype(np.float64, copy=False)
+    mean_a, mean_b = _box_mean(a, window), _box_mean(b, window)
+    variance_a = np.maximum(_box_mean(a * a, window) - mean_a * mean_a, 0.0)
+    variance_b = np.maximum(_box_mean(b * b, window) - mean_b * mean_b, 0.0)
+    covariance = _box_mean(a * b, window) - mean_a * mean_b
+    c1 = (0.01 * 255.0) ** 2
+    c2 = (0.03 * 255.0) ** 2
+    numerator = (2.0 * mean_a * mean_b + c1) * (2.0 * covariance + c2)
+    denominator = (mean_a * mean_a + mean_b * mean_b + c1) * (variance_a + variance_b + c2)
+    return float(np.mean(numerator / np.maximum(denominator, 1e-12)))
+
+
 def load_features(paths: list[str], model, torch, size: int, batch_size: int) -> np.ndarray:
     mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1)
@@ -97,7 +126,6 @@ def main() -> int:
 
     import torch
     from torchvision import models
-    from skimage.metrics import structural_similarity
 
     torch.set_num_threads(args.threads)
     try:
@@ -184,7 +212,7 @@ def main() -> int:
         synthetic_gray = np.asarray(Image.fromarray(synthetic_array).convert("L"), dtype=np.uint8)
         neighbor_array = letterbox(real_paths[best], args.image_size)
         neighbor_gray = np.asarray(Image.fromarray(neighbor_array).convert("L"), dtype=np.uint8)
-        ssim = float(structural_similarity(synthetic_gray, neighbor_gray, data_range=255))
+        ssim = structural_similarity(synthetic_gray, neighbor_gray)
         sample_hash = hashlib.sha256(synthetic_array.tobytes()).hexdigest()
         sample_dhash = difference_hash(synthetic_array)
         distances = np.fromiter((int(sample_dhash ^ int(value)).bit_count() for value in real_dhash_array),
@@ -249,7 +277,7 @@ def main() -> int:
         "synthetic_images_by_method": {str(k): int(v) for k, v in samples.groupby("generation_method").size().items()},
         "feature_encoder": "ImageNet ResNet18 IMAGENET1K_V1, normalized 512-dimensional penultimate features",
         "similarity_metric": "cosine similarity; higher values indicate closer features",
-        "ssim_reference": "nearest image in the full generator-fit partition by feature cosine similarity",
+        "ssim_reference": "nearest image in the full generator-fit partition by feature cosine similarity; 11x11 uniform window, 8-bit luminance range",
         "exact_match_definition": "SHA-256 of EXIF-corrected, reflect-letterboxed RGB pixels at the analysis size",
         "near_duplicate_screen": "minimum difference-hash Hamming distance <=2",
         "analysis_image_size": int(args.image_size),
