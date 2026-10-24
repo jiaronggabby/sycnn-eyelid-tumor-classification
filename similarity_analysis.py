@@ -216,7 +216,7 @@ def main() -> int:
         if observed != expected_labels[str(method)]:
             parser.error(f"{method} seed {seed}: unexpected synthetic class counts {observed}")
 
-    reference = reference.sort_values(["generator_partition", "image_id"], kind="stable").reset_index(drop=True)
+    reference = reference.sort_values(["image_id"], kind="stable").reset_index(drop=True)
     reference_paths = reference["absolute_path"].astype(str).tolist()
     sample_paths = samples["synthetic_path"].tolist()
     real_features, real_gray, real_hashes, real_dhashes = load_image_features(
