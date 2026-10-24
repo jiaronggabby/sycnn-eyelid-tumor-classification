@@ -1,0 +1,134 @@
+{
+  "protocol": "manual_eye_crops_batches1to6_801010_batch7_temporal",
+  "author": "Jia Rong",
+  "source_data": {
+    "root": "eye_dataset",
+    "included_images": 3205,
+    "patient_groups": 873,
+    "retrospective_batches": [1, 2, 3, 4, 5, 6],
+    "later_same_hospital_batch": 7,
+    "later_cohort_design": "same_hospital_later_batch_temporal_validation",
+    "prospective_enrollment_verified": false,
+    "cohort_names": {
+      "retrospective_test": "Retrospective Cohort Test",
+      "later_batch_test": "Prospective Cohort Test"
+    },
+    "crop_source": "returned_manual_eye_crops_only",
+    "unidentified_manual_crops_preserved_but_excluded": 239,
+    "source_records_without_returned_manual_crop_excluded": 282,
+    "overlapping_prior_patient_groups_reserved_for_batch7": 18,
+    "patient_groups_crossing_splits": 0,
+    "exact_duplicate_links_crossing_splits": 0,
+    "dhash_near_duplicate_candidates_crossing_splits": 6,
+    "dhash_candidates_ssim_reviewed": true,
+    "dhash_confirmed_near_duplicate_links_crossing_splits": 0,
+    "dhash_candidate_max_ssim_224": 0.5764
+  },
+  "split": {
+    "assignment_unit": "patient_group",
+    "retrospective_patient_ratios": [0.8, 0.1, 0.1],
+    "assignment_seed": 42,
+    "counts": {
+      "train": {"images": 1995, "patients": 528, "benign_images": 1347, "malignant_images": 648},
+      "validation": {"images": 246, "patients": 67, "benign_images": 168, "malignant_images": 78},
+      "retrospective_test": {"images": 259, "patients": 66, "benign_images": 167, "malignant_images": 92},
+      "later_batch_test": {"images": 705, "patients": 212, "benign_images": 539, "malignant_images": 166}
+    },
+    "preprocessing": {
+      "classifier_input": [224, 224],
+      "generator_input": [256, 256],
+      "aspect_ratio": "preserved",
+      "padding": "reflect",
+      "classifier_normalization": "ImageNet mean and standard deviation"
+    }
+  },
+  "routes": {
+    "paper": "retrospective_cohort",
+    "generation_methods": ["gan", "diffusion"],
+    "backbones": ["resnet50"],
+    "backbone_initialization": "ImageNet pretrained",
+    "heads": ["cnn", "naive_bayes", "xgboost", "random_forest", "svm"],
+    "synthetic_to_real_ratios": [0, 0.5, 1, 2, 3, 4, 5],
+    "class_strategies": ["original_ratio", "balanced_at_ratio_4"],
+    "strong_conventional_controls": true,
+    "routes_per_seed": 81,
+    "seeds": [17, 42, 2024, 2025, 3407]
+  },
+  "generation_methods": [
+    {"name": "gan", "implementation": "class-conditional DCGAN with resize-convolution and EMA", "native_resolution": 256},
+    {"name": "diffusion", "implementation": "class-conditional cosine DDPM with EMA and DDIM sampling", "native_resolution": 256},
+    {"name": "real_only", "implementation": "no synthetic images"}
+  ],
+  "backbones": ["resnet50"],
+  "downstream_heads": ["cnn", "naive_bayes", "xgboost", "random_forest", "svm"],
+  "synthetic_ratios": [0, 0.5, 1, 2, 3, 4, 5],
+  "class_strategies": {
+    "original_ratio": "synthetic counts retain the real training-set class ratio",
+    "balanced": "n=4 only; final real-plus-synthetic training data are balanced 1:1"
+  },
+  "route_selector_defaults": {
+    "retrospective_cohort": {
+      "methods": ["gan", "diffusion"],
+      "backbones": ["resnet50"],
+      "heads": ["cnn", "naive_bayes", "xgboost", "random_forest", "svm"],
+      "ratios": [0, 0.5, 1, 2, 3, 4, 5],
+      "lidsentry": [false],
+      "strategies": ["original_ratio", "balanced"],
+      "strong_conventional_routes": true
+    }
+  },
+  "generator_training": {
+    "maximum_epochs": 1000,
+    "patience": 10,
+    "minimum_epochs": 1,
+    "monitor_partition": "15 percent of fit-cohort patient groups, stratified by class",
+    "final_test_data_used_for_generator_selection": false,
+    "ema_decay": 0.999,
+    "images_per_class_per_seed": 8192,
+    "gan": {
+      "batch_size": 32,
+      "resolution": 256,
+      "upsampling": "nearest-neighbor resize followed by convolution",
+      "checkpoint_selection": "lowest class-conditional polynomial MMD squared on fixed samples",
+      "monitor_samples_per_class": 64,
+      "feature_encoder": "ImageNet pretrained ResNet18 penultimate features"
+    },
+    "diffusion": {
+      "batch_size": 2,
+      "gradient_accumulation_steps": 2,
+      "effective_batch_size": 4,
+      "base_channels": 32,
+      "architecture": "conditional residual U-Net with attention at 16x16",
+      "timesteps": 1000,
+      "noise_schedule": "cosine",
+      "early_stopping_metric": "fixed-noise denoising MSE on train-only patient monitor",
+      "checkpoint_selection": "lowest class-conditional polynomial MMD squared on fixed-noise DDIM samples",
+      "quality_monitor_sampling_steps": 100,
+      "quality_monitor_samples_per_class": 16,
+      "final_sampler": "DDIM",
+      "final_sampling_steps": 100
+    },
+    "image_quality_diagnostics": [
+      "class-conditional polynomial MMD squared in normalized ResNet18 features",
+      "mean pairwise synthetic feature distance",
+      "mean absolute Laplacian response for real and synthetic images"
+    ],
+    "visual_diagnostic": "fixed real-versus-final-pool example panel"
+  },
+  "model_training": {
+    "maximum_epochs": 1000,
+    "patience": 10,
+    "minimum_epochs": 60,
+    "batch_size": 64,
+    "selection_metric": "early-stop patient-group AUROC",
+    "validation_and_test_used_for_early_stopping": false
+  },
+  "selection_and_statistics": {
+    "selection": "mean validation AUROC across five seeds",
+    "tie_breaks": ["mean validation AUPRC", "lower synthetic ratio", "simpler head"],
+    "threshold_selection": "validation only",
+    "bootstrap_unit": "patient_group",
+    "bootstrap_replicates": 1000,
+    "reported_test_cohorts": ["retrospective_test", "later_batch_test"]
+  }
+}
