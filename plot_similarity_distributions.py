@@ -34,7 +34,7 @@ NUMERIC_FIELDS = (
     "synthetic_label",
     "feature_cosine_similarity",
     "ssim_to_nearest_feature_neighbor",
-    "minimum_fit_dhash_hamming",
+    "minimum_training_dhash_hamming",
     "dhash_near_duplicate_le_2",
     "exact_canonical_pixel_match",
 )
