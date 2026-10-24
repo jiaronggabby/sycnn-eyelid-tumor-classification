@@ -192,8 +192,8 @@ def main() -> int:
         parser.error("training reference is empty or contains duplicate image IDs")
     if len(reference) != 1695:
         parser.error(f"expected 1,695 real training references, found {len(reference)}")
-    if set(reference["reference_scope"].astype(str)) != {"training_cohort"}:
-        parser.error("all reference images must belong to the complete training cohort")
+    if set(reference["reference_scope"].astype(str)) != {"generator_training_pool"}:
+        parser.error("all reference images must belong to the generator training pool")
     if reference["absolute_path"].duplicated().any():
         parser.error("training reference contains duplicate image paths")
     if not set(reference["label"].unique()).issubset({0, 1}):
@@ -363,7 +363,7 @@ def main() -> int:
     input_summary = json.loads(input_summary_path.read_text(encoding="utf-8")) if input_summary_path.is_file() else {}
     metadata = {
         "status": "complete",
-        "reference_scope": "all real images in the model-training cohort, including generator-fit and checkpoint-monitor images",
+        "reference_scope": "all real images in the generator training pool, including generator-fit and checkpoint-monitor partitions",
         "reference_images": int(reference_n),
         "reference_patient_groups": reference_groups_n,
         "source_fit_monitor_partition_counts": [

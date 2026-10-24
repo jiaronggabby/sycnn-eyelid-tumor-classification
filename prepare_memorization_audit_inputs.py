@@ -102,7 +102,7 @@ def main() -> int:
             "generation_method": method,
             "fit_images": int(counts.get("fit", 0)),
             "checkpoint_monitor_images": int(counts.get("monitor", 0)),
-            "training_cohort_images": int(len(frame)),
+            "generator_training_pool_images": int(len(frame)),
             "patient_groups": int(frame["patient_group"].nunique()),
             "source_manifest": str(path),
         })
@@ -174,7 +174,7 @@ def main() -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     reference = first.loc[:, list(COHORT_FIELDS)].sort_values("image_id", kind="stable").reset_index(drop=True)
-    reference["reference_scope"] = "training_cohort"
+    reference["reference_scope"] = "generator_training_pool"
     reference = reference[["reference_scope", "image_id", "patient_group", "label", "absolute_path"]]
     reference_path = args.output_dir / "training_reference_1695.csv"
     sample_path = args.output_dir / "selected_synthetic_samples.csv"
