@@ -92,7 +92,7 @@ def fonts(font_path: Path | None) -> tuple[ImageFont.FreeTypeFont, ImageFont.Fre
             regular,
         ]
     )
-    return ImageFont.truetype(str(regular), 58), ImageFont.truetype(str(bold), 72)
+    return ImageFont.truetype(str(regular), 75), ImageFont.truetype(str(bold), 90)
 
 
 def quantile(values: list[float], q: float) -> float:
@@ -132,7 +132,7 @@ def draw_panel(
         return round(axis_bottom - (value - y_min) / (y_max - y_min) * axis_height)
 
     # Panel letter sits in the reserved upper-left margin, outside the axes.
-    draw.text((x0 + 105, 76), label, font=bold, fill=INK)
+    draw.text((x0 + 105, 55), label, font=bold, fill=INK)
 
     for tick in range(6):
         value = y_min + (y_max - y_min) * tick / 5
@@ -207,7 +207,7 @@ def main() -> int:
     width, height = 4200, 1800
     image = Image.new("RGBA", (width, height), (255, 255, 255, 255))
     font_pair = fonts(args.font)
-    draw_panel(image, rows, "feature_cosine_similarity", "ResNet50 feature cosine similarity", "A", 0, font_pair, 2401)
+    draw_panel(image, rows, "feature_cosine_similarity", "Feature cosine similarity", "A", 0, font_pair, 2401)
     draw_panel(image, rows, "ssim_to_nearest_feature_neighbor", "SSIM", "B", 2070, font_pair, 2402, include_negative=True)
     args.figure.parent.mkdir(parents=True, exist_ok=True)
     image.convert("RGB").save(args.figure, dpi=(600, 600), optimize=True)

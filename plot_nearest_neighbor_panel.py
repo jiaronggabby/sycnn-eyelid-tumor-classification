@@ -86,8 +86,8 @@ def main() -> int:
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
     heading = font(62, True, args.font)
-    subheading = font(45, True, args.font)
-    body = font(32, False, args.font)
+    subheading = font(56, True, args.font)
+    body = font(54, False, args.font)
     margin_x, label_w, gap, img_w, img_h = 80, 310, 45, 1120, 680
     col1 = margin_x + label_w + gap
     col2 = col1 + img_w + 150
