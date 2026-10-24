@@ -19,6 +19,7 @@ MUTED = (92, 103, 114)
 LINE = (190, 198, 205)
 METHODS = (("gan", "GAN"), ("diffusion", "Diffusion"))
 CLASSES = ((0, "Benign"), (1, "Malignant"))
+RESAMPLING = getattr(Image, "Resampling", Image)
 
 
 def font(size: int, bold: bool = False, requested: Path | None = None) -> ImageFont.FreeTypeFont:
@@ -37,7 +38,7 @@ def font(size: int, bold: bool = False, requested: Path | None = None) -> ImageF
 def load_rgb(path: str, size: tuple[int, int]) -> Image.Image:
     with Image.open(path) as raw:
         image = ImageOps.exif_transpose(raw).convert("RGB")
-    image.thumbnail(size, Image.Resampling.LANCZOS)
+    image.thumbnail(size, RESAMPLING.LANCZOS)
     canvas = Image.new("RGB", size, "white")
     canvas.paste(image, ((size[0] - image.width) // 2, (size[1] - image.height) // 2))
     return canvas
