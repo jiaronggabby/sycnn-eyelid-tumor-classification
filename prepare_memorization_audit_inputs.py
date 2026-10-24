@@ -21,6 +21,7 @@ ROUTES = {
     "diffusion": ("diffusion_resnet50_cnn_n3_original_ratio_nolidsentry_size224", 3, 5085, {0: 3435, 1: 1650}),
 }
 PARTITION_FIELDS = ("image_id", "patient_group", "label", "generator_partition", "absolute_path")
+COHORT_FIELDS = ("image_id", "patient_group", "label", "absolute_path")
 
 
 def read_partition(path: Path) -> pd.DataFrame:
@@ -47,7 +48,8 @@ def read_partition(path: Path) -> pd.DataFrame:
 
 
 def digest_membership(frame: pd.DataFrame) -> str:
-    values = frame.loc[:, list(PARTITION_FIELDS)].astype(str).to_csv(index=False, lineterminator="\n")
+    """Hash cohort identity independently of seed-specific fit/monitor assignment."""
+    values = frame.loc[:, list(COHORT_FIELDS)].astype(str).sort_values("image_id").to_csv(index=False, lineterminator="\n")
     return hashlib.sha256(values.encode("utf-8")).hexdigest()
 
 
@@ -68,8 +70,6 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True, type=Path,
                         help="private working directory for manifests; do not publish these files")
     parser.add_argument("--expected-train-images", type=int, default=1695)
-    parser.add_argument("--expected-fit-images", type=int, default=1439)
-    parser.add_argument("--expected-monitor-images", type=int, default=256)
     args = parser.parse_args()
 
     reference_paths = [
@@ -81,16 +81,31 @@ def main() -> int:
     ]
     references = [read_partition(path) for path in reference_paths]
     first = references[0]
-    expected_counts = first["generator_partition"].value_counts().to_dict()
     if len(first) != args.expected_train_images:
         raise ValueError(f"Expected {args.expected_train_images} training references, found {len(first)}")
-    if expected_counts.get("fit", 0) != args.expected_fit_images:
-        raise ValueError(f"Expected {args.expected_fit_images} generator-fit images, found {expected_counts.get('fit', 0)}")
-    if expected_counts.get("monitor", 0) != args.expected_monitor_images:
-        raise ValueError(f"Expected {args.expected_monitor_images} monitoring images, found {expected_counts.get('monitor', 0)}")
     reference_digest = digest_membership(first)
     if any(digest_membership(frame) != reference_digest for frame in references[1:]):
-        raise ValueError("Training reference membership differs across seeds or generator families")
+        raise ValueError("Training-cohort image, patient-group, label, or source-path membership differs across seeds or generators")
+
+    partition_records = []
+    reference_specifications = [
+        (seed, "gan", args.gan_partition_root / f"seed_{seed}" / "gan_training_partition.csv")
+        for seed in SEEDS
+    ] + [
+        (seed, "diffusion", args.diffusion_partition_root / f"seed_{seed}" / "diffusion_training_partition.csv")
+        for seed in SEEDS
+    ]
+    for (seed, method, path), frame in zip(reference_specifications, references):
+        counts = frame["generator_partition"].value_counts().to_dict()
+        partition_records.append({
+            "seed": seed,
+            "generation_method": method,
+            "fit_images": int(counts.get("fit", 0)),
+            "checkpoint_monitor_images": int(counts.get("monitor", 0)),
+            "training_cohort_images": int(len(frame)),
+            "patient_groups": int(frame["patient_group"].nunique()),
+            "source_manifest": str(path),
+        })
 
     sample_frames: list[pd.DataFrame] = []
     route_records = []
@@ -158,19 +173,23 @@ def main() -> int:
         raise AssertionError("Combined sample count does not match route records")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    reference = first.loc[:, list(COHORT_FIELDS)].sort_values("image_id", kind="stable").reset_index(drop=True)
+    reference["reference_scope"] = "training_cohort"
+    reference = reference[["reference_scope", "image_id", "patient_group", "label", "absolute_path"]]
     reference_path = args.output_dir / "training_reference_1695.csv"
     sample_path = args.output_dir / "selected_synthetic_samples.csv"
-    first.to_csv(reference_path, index=False)
+    reference.to_csv(reference_path, index=False)
     samples.to_csv(sample_path, index=False)
     summary = {
         "status": "complete",
         "seeds": list(SEEDS),
-        "training_reference_images": int(len(first)),
-        "training_reference_images_by_partition": {
-            str(k): int(v) for k, v in expected_counts.items()
+        "training_reference_images": int(len(reference)),
+        "training_reference_images_by_label": {
+            str(k): int(v) for k, v in reference["label"].value_counts().sort_index().items()
         },
-        "training_reference_patient_groups": int(first["patient_group"].nunique()),
+        "training_reference_patient_groups": int(reference["patient_group"].nunique()),
         "reference_membership_sha256": reference_digest,
+        "source_fit_monitor_partition_counts": partition_records,
         "synthetic_samples_total": int(len(samples)),
         "selected_routes": route_records,
         "note": "Private manifests contain image paths and patient-group identifiers; keep on the approved remote.",
@@ -180,7 +199,14 @@ def main() -> int:
         "status": "complete",
         "training_reference_images": len(first),
         "synthetic_samples_total": len(samples),
-        "samples_by_method_seed": samples.groupby(["generation_method", "seed"]).size().to_dict(),
+        "samples_by_method_seed": {
+            f"{method}_{seed}": int(count)
+            for (method, seed), count in samples.groupby(["generation_method", "seed"]).size().items()
+        },
+        "source_fit_monitor_partition_counts": [
+            {k: v for k, v in record.items() if k not in {"source_manifest"}}
+            for record in partition_records
+        ],
         "routes_completed": len(route_records),
     }, indent=2, default=str))
     return 0

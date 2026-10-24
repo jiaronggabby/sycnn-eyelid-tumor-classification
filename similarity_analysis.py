@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageOps
+from PIL import Image
 
 LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 PIXEL_COUNTS = np.asarray([value.bit_count() for value in range(256)], dtype=np.uint8)
@@ -33,9 +33,9 @@ def sha256(path: Path) -> str:
 
 
 def letterbox(path: str | Path, size: int) -> np.ndarray:
-    """EXIF-correct, aspect-preserving RGB resize with reflect padding."""
+    """Match the experiment's aspect-preserving RGB resize and reflect padding."""
     with Image.open(path) as raw:
-        image = ImageOps.exif_transpose(raw).convert("RGB")
+        image = raw.convert("RGB")
     width, height = image.size
     scale = min(size / max(width, 1), size / max(height, 1))
     target = (max(1, round(width * scale)), max(1, round(height * scale)))
@@ -182,31 +182,22 @@ def main() -> int:
         parser.error("labels must be encoded as 0 or 1")
 
     partition = pd.read_csv(args.training_reference, dtype={"patient_group": str, "image_id": str, "absolute_path": str})
-    required_reference = {"generator_partition", "patient_group", "image_id", "label", "absolute_path"}
+    required_reference = {"reference_scope", "patient_group", "image_id", "label", "absolute_path"}
     missing = sorted(required_reference - set(partition.columns))
     if missing:
         parser.error(f"training reference is missing columns: {missing}")
-    reference = partition.loc[
-        partition["generator_partition"].astype(str).isin({"fit", "monitor"})
-    ].copy()
+    reference = partition.copy()
     reference["label"] = pd.to_numeric(reference["label"], errors="raise").astype(int)
     if reference.empty or reference["image_id"].duplicated().any():
         parser.error("training reference is empty or contains duplicate image IDs")
     if len(reference) != 1695:
         parser.error(f"expected 1,695 real training references, found {len(reference)}")
+    if set(reference["reference_scope"].astype(str)) != {"training_cohort"}:
+        parser.error("all reference images must belong to the complete training cohort")
     if reference["absolute_path"].duplicated().any():
         parser.error("training reference contains duplicate image paths")
-    if set(reference["generator_partition"].astype(str)) != {"fit", "monitor"}:
-        parser.error("both generator-fit and checkpoint-monitor images must be present")
-    partition_counts = reference["generator_partition"].astype(str).value_counts().to_dict()
-    if partition_counts != {"fit": 1439, "monitor": 256}:
-        parser.error(f"unexpected real training partition sizes: {partition_counts}")
     if not set(reference["label"].unique()).issubset({0, 1}):
         parser.error("reference labels must be encoded as 0 or 1")
-    fit_groups = set(reference.loc[reference["generator_partition"].eq("fit"), "patient_group"])
-    monitor_groups = set(reference.loc[reference["generator_partition"].eq("monitor"), "patient_group"])
-    if fit_groups & monitor_groups:
-        parser.error("patient groups cross generator-fit and checkpoint-monitor partitions")
     samples = samples.sort_values(
         ["generation_method", "seed", "synthetic_label", "synthetic_id"], kind="stable"
     ).reset_index(drop=True)
@@ -242,7 +233,7 @@ def main() -> int:
     synthetic_labels = samples["synthetic_label"].to_numpy()
     real_ids = reference["image_id"].astype(str).to_numpy()
     real_groups = reference["patient_group"].astype(str).to_numpy()
-    real_parts = reference["generator_partition"].astype(str).to_numpy()
+    real_parts = reference["reference_scope"].astype(str).to_numpy()
 
     best_indices = np.empty(len(samples), dtype=np.int32)
     best_scores = np.empty(len(samples), dtype=np.float32)
@@ -368,13 +359,18 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     per_sample.to_csv(args.output_dir / "per_sample_neighbors.csv", index=False)
     pd.DataFrame(summary_rows).to_csv(args.output_dir / "summary.csv", index=False)
+    input_summary_path = args.training_reference.parent / "input_summary.json"
+    input_summary = json.loads(input_summary_path.read_text(encoding="utf-8")) if input_summary_path.is_file() else {}
     metadata = {
         "status": "complete",
-        "reference_scope": "all real images in the model-training cohort; generator-fit and checkpoint-monitor partitions only",
+        "reference_scope": "all real images in the model-training cohort, including generator-fit and checkpoint-monitor images",
         "reference_images": int(reference_n),
         "reference_patient_groups": reference_groups_n,
-        "reference_images_by_partition": {str(k): int(v) for k, v in partition_counts.items()},
-        "patient_group_crossings_between_fit_and_monitor": 0,
+        "source_fit_monitor_partition_counts": [
+            {k: v for k, v in record.items() if k != "source_manifest"}
+            for record in input_summary.get("source_fit_monitor_partition_counts", [])
+        ],
+        "reference_membership_sha256": input_summary.get("reference_membership_sha256"),
         "reference_images_by_label": {str(k): int(v) for k, v in reference["label"].value_counts().sort_index().items()},
         "synthetic_images_by_method_seed": {
             f"{method}_{seed}": int(count) for (method, seed), count in route_counts.items()
@@ -382,7 +378,7 @@ def main() -> int:
         "feature_encoder": "ImageNet ResNet50 IMAGENET1K_V1, L2-normalized 2048-dimensional penultimate features",
         "similarity_metric": "cosine similarity; higher values indicate closer features",
         "ssim_reference": "each synthetic image's nearest real training image by ResNet50 feature cosine similarity; 11x11 uniform local windows with valid-region averaging",
-        "exact_match_definition": "SHA-256 of EXIF-corrected, aspect-preserving reflect-letterboxed RGB pixels at the analysis size",
+        "exact_match_definition": "SHA-256 of aspect-preserving reflect-letterboxed RGB pixels at the analysis size",
         "near_duplicate_screen": "minimum 64-bit difference-hash Hamming distance <=2 against the real training reference",
         "analysis_image_size": int(args.image_size),
         "device": str(device),
